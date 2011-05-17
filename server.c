@@ -654,7 +654,7 @@ static void reqlog(const char *rem_host, const char *username,
 	free(f);
 }
 
-void sharelog(const char *rem_host, const char *username, const unsigned int userid,
+void sharelog(const unsigned int status, const char *rem_host, const char *username, const unsigned int userid,
 	      const char *our_result, const char *upstream_result,
 	      const char *reason, const char *solution)
 {
@@ -664,8 +664,7 @@ void sharelog(const char *rem_host, const char *username, const unsigned int use
 	struct tm tm;
 
 	if (srv.db_sharelog && srv.db_ops->sharelog != NULL)
-		srv.db_ops->sharelog(rem_host, userid, our_result,
-				     upstream_result, reason, solution);
+		srv.db_ops->sharelog(status, rem_host, userid, solution);
 
 	if (srv.share_fd < 0)
 		return;
@@ -673,7 +672,7 @@ void sharelog(const char *rem_host, const char *username, const unsigned int use
 	gettimeofday(&tv, NULL);
 	gmtime_r(&tv.tv_sec, &tm);
 
-	if (asprintf(&f, "[%d-%02d-%02d %02d:%02d:%02.6f] %s %s %u %s %s %s %s\n",
+	if (asprintf(&f, "[%d-%02d-%02d %02d:%02d:%02.6f] %s %s %u %d %s %s %s %s\n",
 		tm.tm_year + 1900,
 		tm.tm_mon + 1,
 		tm.tm_mday,
@@ -684,6 +683,7 @@ void sharelog(const char *rem_host, const char *username, const unsigned int use
 	        (rem_host && *rem_host) ? rem_host : "-",
 	        (username && *username) ? username : "-",
 			userid,
+			status,
 	        (our_result && *our_result) ? our_result : "-",
 	        (upstream_result && *upstream_result) ? upstream_result : "-",
 	        (reason && *reason) ? reason : "-",

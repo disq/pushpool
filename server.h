@@ -110,9 +110,7 @@ struct genlist {
 
 struct server_db_ops {
 	char	* (*pwdb_lookup)(const char *user, unsigned int *userid_out);
-	bool	(*sharelog)(const char *rem_host, const unsigned int userid,
-			    const char *our_result, const char *upstream_result,
-			    const char *reason, const char *solution);
+	bool	(*sharelog)(const unsigned int status, const char *rem_host, const unsigned int userid, const char *solution);
 	bool	(*open)(void);
 	void	(*close)(void);
 };
@@ -201,7 +199,7 @@ extern bool hist_lookup(struct hist *hist, const unsigned char *hash);
 extern int debugging;
 extern bool use_syslog;
 extern struct server srv;
-extern void sharelog(const char *rem_host, const char *username, const unsigned int userid,
+extern void sharelog(const unsigned int status, const char *rem_host, const char *username, const unsigned int userid,
 		     const char *, const char *,
 		     const char *, const char *);
 extern bool cjson_encode(unsigned char op, const char *obj_unc,

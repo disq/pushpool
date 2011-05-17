@@ -307,11 +307,11 @@ static int check_hash(const char *remote_host, const char *auth_user,
 
 	if (stale_work(data)) {
 		*reason_out = "stale";
-		return 0;		/* work is invalid */
+		return 3;		/* work is invalid */
 	}
 	if (!work_in_log(auth_user, data)) {
 		*reason_out = "work-not-in-log";
-		return 0;		/* work is invalid */
+		return 5;		/* work is invalid */
 	}
 
 	for (i = 0; i < 128/4; i++)
@@ -322,21 +322,21 @@ static int check_hash(const char *remote_host, const char *auth_user,
 
 	if (hash32[7] != 0) {
 		*reason_out = "H-not-zero";
-		return 0;		/* work is invalid */
+		return 6;		/* work is invalid */
 	}
 	if (hash[27] == 0)
 		better_hash = true;
 
 	if (hist_lookup(srv.hist, hash)) {
 		*reason_out = "duplicate";
-		return 0;		/* work is invalid */
+		return 4;		/* work is invalid */
 	}
 	if (!hist_add(srv.hist, hash)) {
 		applog(LOG_ERR, "hist_add OOM");
 		return -1;		/* error; failure */
 	}
 
-	return better_hash ? 2 : 1;			/* work is valid */
+	return better_hash ? 1 : 0;			/* work is valid */
 }
 
 static bool submit_work(const char *remote_host, const char *auth_user, const unsigned int auth_userid,
@@ -352,18 +352,18 @@ static bool submit_work(const char *remote_host, const char *auth_user, const un
 	check_rc = check_hash(remote_host, auth_user, hexstr, &reason);
 	if (check_rc < 0)	/* internal failure */
 		goto out;
-	if (check_rc == 0) {	/* invalid hash */
+	if (check_rc > 1) {	/* invalid hash */
 		*json_result = false;
-		sharelog(remote_host, auth_user, auth_userid, "N", NULL, reason, hexstr);
+		sharelog(check_rc, remote_host, auth_user, auth_userid, "N", NULL, reason, hexstr);
 		return true;
 	}
 
 	/* if hash is sufficient for share, but not target,
 	 * don't bother submitting to bitcoind
 	 */
-	if (srv.easy_target && check_rc == 1) {
+	if (srv.easy_target && check_rc == 0) {
 		*json_result = true;
-		sharelog(remote_host, auth_user, auth_userid, "Y", NULL, NULL, hexstr);
+		sharelog(check_rc, remote_host, auth_user, auth_userid, "Y", NULL, NULL, hexstr);
 		return true;
 	}
 
@@ -382,7 +382,7 @@ static bool submit_work(const char *remote_host, const char *auth_user, const un
 	*json_result = json_is_true(json_object_get(val, "result"));
 	rc = true;
 
-	sharelog(remote_host, auth_user, auth_userid,
+	sharelog(check_rc, remote_host, auth_user, auth_userid,
 		 srv.easy_target ? "Y" : *json_result ? "Y" : "N",
 		 *json_result ? "Y" : "N", NULL, hexstr);
 

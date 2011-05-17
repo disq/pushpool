@@ -34,9 +34,8 @@
 #define DEFAULT_STMT_PWDB \
 	"SELECT id, password FROM pool_worker WHERE username = ?"
 #define DEFAULT_STMT_SHARELOG \
-	"INSERT INTO shares (rem_host, userid, our_result, "		\
-	"                    upstream_result, reason, solution) "	\
-	"VALUES(?,?,?,?,?,?)"
+	"INSERT INTO shares (userid, status, rem_host, solution)"		\
+	"VALUES(?,?,?,?)"
 
 static void bind_instr(MYSQL_BIND *bind_param, unsigned long *bind_lengths,
 		       unsigned int idx, const char *s)
@@ -142,14 +141,12 @@ err_out:
 	return NULL;
 }
 
-static bool my_sharelog(const char *rem_host, const unsigned int userid,
-			const char *our_result, const char *upstream_result,
-			const char *reason, const char *solution)
+static bool my_sharelog(const unsigned int status, const char *rem_host, const unsigned int userid, const char *solution)
 {
 	MYSQL *db = srv.db_cxn;
 	MYSQL_STMT *stmt;
-	MYSQL_BIND bind_param[6];
-	unsigned long bind_lengths[6];
+	MYSQL_BIND bind_param[4];
+	unsigned long bind_lengths[4];
 	bool rc = false;
 	const char *step = "init";
 
@@ -159,12 +156,16 @@ static bool my_sharelog(const char *rem_host, const unsigned int userid,
 
 	memset(bind_param, 0, sizeof(bind_param));
 	memset(bind_lengths, 0, sizeof(bind_lengths));
-	bind_instr(bind_param, bind_lengths, 0, rem_host);
-	bind_inint(bind_param, bind_lengths, 1, userid);
-	bind_instr(bind_param, bind_lengths, 2, our_result);
-	bind_instr(bind_param, bind_lengths, 3, upstream_result);
-	bind_instr(bind_param, bind_lengths, 4, reason);
-	bind_instr(bind_param, bind_lengths, 5, solution);
+	bind_inint(bind_param, bind_lengths, 0, userid);
+
+	char tmp[8];
+	snprintf(tmp, 8, "%u", status);
+	bind_instr(bind_param, bind_lengths, 1, tmp); // bug workaround
+
+//	bind_inint(bind_param, bind_lengths, 1, status);
+
+	bind_instr(bind_param, bind_lengths, 2, rem_host);
+	bind_instr(bind_param, bind_lengths, 3, solution);
 
 	step = "prep";
 	if (mysql_stmt_prepare(stmt, srv.db_stmt_sharelog,
