@@ -64,32 +64,57 @@ static const char *bc_err_str[] = {
 
 char *pwdb_lookup(const char *user, unsigned int *userid)
 {
-	char *pass = NULL;
+	char *data = NULL, *colon, *pass = NULL;
 	char cred_key[256];
 	uint32_t out_flags;
 	size_t out_len;
 	memcached_return_t rc;
 
-	if (false && srv.mc) {
+	if (srv.mc) {
 		snprintf(cred_key, sizeof(cred_key),
-			 "/pushpoold/cred_cache/%s", user);
+			 "/pushpoold/cred_cache-dev/%s", user);
 
-		pass = memcached_get(srv.mc, cred_key, strlen(cred_key) + 1,
+		data = memcached_get(srv.mc, cred_key, strlen(cred_key) + 1,
 				     &out_len, &out_flags, &rc);
-		if (rc == MEMCACHED_SUCCESS)
-			return pass;		/* may be NULL, for negative caching */
+
+		if (rc == MEMCACHED_SUCCESS) {
+			if (data == NULL) {
+				userid = 0;
+				return data; /* may be NULL, for negative caching */
+				}
+
+			colon = strchr(data, ':');
+			if (colon) {
+				*colon = 0;
+				char tmp[16];
+				strncpy(tmp, data, 16);
+				*userid = atoi(tmp);
+
+				pass = strdup(colon+1);
+				free(data);
+				return pass;
+				}
+/* no colon, fall thru */
+		}
 	}
 
 	pass = srv.db_ops->pwdb_lookup(user, userid);
 
-	if (false && srv.mc) {
-		rc = memcached_set(srv.mc, cred_key, strlen(cred_key) + 1,
-				   pass,
-				   pass ? strlen(pass) + 1 : 0,
-				   srv.cred_expire, 0);
-		if (rc != MEMCACHED_SUCCESS)
-			applog(LOG_WARNING, "memcached store(%s) failed: %s",
-			       cred_key, memcached_strerror(srv.mc, rc));
+	if (srv.mc && pass /*dont allow null in sprintf*/) {
+		char *outdata;
+		if (asprintf(&outdata, "%u:%s", *userid, pass) >= 0) {
+			rc = memcached_set(srv.mc, cred_key, strlen(cred_key) + 1,
+					   outdata,
+					   outdata ? strlen(outdata) + 1 : 0,
+					   srv.cred_expire, 0);
+			if (rc != MEMCACHED_SUCCESS)
+				applog(LOG_WARNING, "memcached store(%s) failed: %s",
+				       cred_key, memcached_strerror(srv.mc, rc));
+
+			free(outdata);
+		} else {
+			applog(LOG_WARNING, "memcached store(%s) failed on sprintf", cred_key);
+			}
 	}
 
 	return pass;
