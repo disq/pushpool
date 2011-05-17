@@ -109,8 +109,8 @@ struct genlist {
 };
 
 struct server_db_ops {
-	char	* (*pwdb_lookup)(const char *user);
-	bool	(*sharelog)(const char *rem_host, const char *username,
+	char	* (*pwdb_lookup)(const char *user, unsigned int *userid_out);
+	bool	(*sharelog)(const char *rem_host, const unsigned int userid,
 			    const char *our_result, const char *upstream_result,
 			    const char *reason, const char *solution);
 	bool	(*open)(void);
@@ -182,7 +182,7 @@ struct server {
 extern void read_config(void);
 
 /* msg.c */
-extern char *pwdb_lookup(const char *user);
+extern char *pwdb_lookup(const char *user, unsigned int *userid);
 extern void worker_log_expire(time_t expire_time);
 extern bool cli_op_login(struct client *cli, const json_t *obj,
 			 unsigned int msgsz);
@@ -190,7 +190,7 @@ extern bool cli_op_config(struct client *cli, const json_t *obj);
 extern bool cli_op_work_get(struct client *cli, unsigned int msgsz);
 extern bool cli_op_work_submit(struct client *cli, unsigned int msgsz);
 extern bool msg_json_rpc(struct evhttp_request *req, json_t *jreq,
-			 const char *username,
+			 const char *username, const unsigned int userid,
 			 void **reply, unsigned int *reply_len);
 extern void hist_free(struct hist *hist);
 extern struct hist *hist_alloc(void);
@@ -201,7 +201,7 @@ extern bool hist_lookup(struct hist *hist, const unsigned char *hash);
 extern int debugging;
 extern bool use_syslog;
 extern struct server srv;
-extern void sharelog(const char *rem_host, const char *username,
+extern void sharelog(const char *rem_host, const char *username, const unsigned int userid,
 		     const char *, const char *,
 		     const char *, const char *);
 extern bool cjson_encode(unsigned char op, const char *obj_unc,

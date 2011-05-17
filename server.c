@@ -562,7 +562,7 @@ err_out:
 	cli_free(cli);
 }
 
-static bool valid_auth_hdr(const char *hdr, char *username_out)
+static bool valid_auth_hdr(const char *hdr, char *username_out, unsigned int *userid_out)
 {
 	char *t_type = NULL;
 	char *t_b64 = NULL;
@@ -573,6 +573,7 @@ static bool valid_auth_hdr(const char *hdr, char *username_out)
 	size_t bin_len = 0;
 	void *bin = NULL;
 
+	*userid_out = 0;
 	t_type = calloc(1, hdrlen + 1);
 	t_b64 = calloc(1, hdrlen + 1);
 	t_userpass = calloc(1, hdrlen + 1);
@@ -602,7 +603,7 @@ static bool valid_auth_hdr(const char *hdr, char *username_out)
 	pass = colon + 1;
 
 	/* password database authentication check */
-	pass_db = pwdb_lookup(user);
+	pass_db = pwdb_lookup(user, userid_out);
 	if (!pass_db || (strcmp(pass, pass_db) && *pass_db != '\0'))
 		goto out;
 
@@ -653,7 +654,7 @@ static void reqlog(const char *rem_host, const char *username,
 	free(f);
 }
 
-void sharelog(const char *rem_host, const char *username,
+void sharelog(const char *rem_host, const char *username, const unsigned int userid,
 	      const char *our_result, const char *upstream_result,
 	      const char *reason, const char *solution)
 {
@@ -663,7 +664,7 @@ void sharelog(const char *rem_host, const char *username,
 	struct tm tm;
 
 	if (srv.db_sharelog && srv.db_ops->sharelog != NULL)
-		srv.db_ops->sharelog(rem_host, username, our_result,
+		srv.db_ops->sharelog(rem_host, userid, our_result,
 				     upstream_result, reason, solution);
 
 	if (srv.share_fd < 0)
@@ -672,7 +673,7 @@ void sharelog(const char *rem_host, const char *username,
 	gettimeofday(&tv, NULL);
 	gmtime_r(&tv.tv_sec, &tm);
 
-	if (asprintf(&f, "[%d-%02d-%02d %02d:%02d:%02.6f] %s %s %s %s %s %s\n",
+	if (asprintf(&f, "[%d-%02d-%02d %02d:%02d:%02.6f] %s %s %d %s %s %s %s\n",
 		tm.tm_year + 1900,
 		tm.tm_mon + 1,
 		tm.tm_mday,
@@ -682,6 +683,7 @@ void sharelog(const char *rem_host, const char *username,
 		tv.tv_usec/1000000.0,
 	        (rem_host && *rem_host) ? rem_host : "-",
 	        (username && *username) ? username : "-",
+			userid,
 	        (our_result && *our_result) ? our_result : "-",
 	        (upstream_result && *upstream_result) ? upstream_result : "-",
 	        (reason && *reason) ? reason : "-",
@@ -700,6 +702,7 @@ static void http_handle_req(struct evhttp_request *req, bool longpoll)
 	const char *clen_str, *auth;
 	char *body_str;
 	char username[65] = "";
+	unsigned int userid = 0;
 	void *body, *reply = NULL;
 	int clen = 0;
 	unsigned int reply_len = 0;
@@ -715,7 +718,7 @@ static void http_handle_req(struct evhttp_request *req, bool longpoll)
 		evhttp_send_reply(req, 401, "not authorized", NULL);
 		return;
 	}
-	if (!valid_auth_hdr(auth, username)) {
+	if (!valid_auth_hdr(auth, username, &userid)) {
 		reqlog(req->remote_host, username, req->uri);
 		evhttp_send_reply(req, 403, "access forbidden", NULL);
 		return;
@@ -747,7 +750,7 @@ static void http_handle_req(struct evhttp_request *req, bool longpoll)
 	if (!jreq)
 		goto err_out_bad_req;
 
-	rc = msg_json_rpc(req, jreq, username, &reply, &reply_len);
+	rc = msg_json_rpc(req, jreq, username, userid, &reply, &reply_len);
 
 	json_decref(jreq);
 
@@ -804,6 +807,7 @@ static void __http_srv_event(struct evhttp_request *req, void *arg,
 	struct server_socket *sock = arg;
 	const char *auth;
 	char username[65] = "";
+	unsigned int userid = 0;
 
 	/* copy X-Forwarded-For header to remote_host, if a trusted proxy provides it */
 	if (sock->cfg->proxy && !strcmp(req->remote_host, sock->cfg->proxy)) {
@@ -823,7 +827,7 @@ static void __http_srv_event(struct evhttp_request *req, void *arg,
 		evhttp_send_reply(req, 401, "not authorized", NULL);
 		return;
 	}
-	if (!valid_auth_hdr(auth, username)) {
+	if (!valid_auth_hdr(auth, username, &userid)) {
 		reqlog(req->remote_host, username, req->uri);
 		evhttp_send_reply(req, 403, "access forbidden", NULL);
 		return;

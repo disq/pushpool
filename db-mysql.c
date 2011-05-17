@@ -32,9 +32,9 @@
 #include <mysql.h>
 
 #define DEFAULT_STMT_PWDB \
-	"SELECT password FROM pool_worker WHERE username = ?"
+	"SELECT id, password FROM pool_worker WHERE username = ?"
 #define DEFAULT_STMT_SHARELOG \
-	"INSERT INTO shares (rem_host, username, our_result, "		\
+	"INSERT INTO shares (rem_host, userid, our_result, "		\
 	"                    upstream_result, reason, solution) "	\
 	"VALUES(?,?,?,?,?,?)"
 
@@ -53,11 +53,21 @@ static void bind_instr(MYSQL_BIND *bind_param, unsigned long *bind_lengths,
 	}
 }
 
-static char *my_pwdb_lookup(const char *user)
+static void bind_inint(MYSQL_BIND *bind_param, unsigned long *bind_lengths,
+		       unsigned int idx, const unsigned int i)
+{
+	bind_param[idx].buffer_type = MYSQL_TYPE_LONG;
+	bind_param[idx].buffer = (void *) &i;
+	bind_lengths[idx] =
+	bind_param[idx].buffer_length = 0;
+	bind_param[idx].length = 0;
+}
+
+static char *my_pwdb_lookup(const char *user, unsigned int *userid_out)
 {
 	MYSQL *db = srv.db_cxn;
 	MYSQL_STMT *stmt;
-	MYSQL_BIND bind_param[1], bind_res[1];
+	MYSQL_BIND bind_param[1], bind_res[2];
 	unsigned long bind_lengths[1], bind_res_lengths[1];
 	char password[256], *pass_ret;
 	int pass_len;
@@ -85,10 +95,15 @@ static char *my_pwdb_lookup(const char *user)
 
 	memset(bind_res, 0, sizeof(bind_res));
 	memset(bind_res_lengths, 0, sizeof(bind_res_lengths));
-	bind_res[0].buffer_type = MYSQL_TYPE_STRING;
-	bind_res[0].buffer = password;
-	bind_res[0].buffer_length = sizeof(password);
-	bind_res[0].length = &bind_res_lengths[0];
+
+	bind_res[0].buffer_type = MYSQL_TYPE_LONG;
+	bind_res[0].buffer = userid_out;
+	bind_res[0].is_unsigned = true;
+
+	bind_res[1].buffer_type = MYSQL_TYPE_STRING;
+	bind_res[1].buffer = password;
+	bind_res[1].buffer_length = sizeof(password);
+	bind_res[1].length = &bind_res_lengths[0];
 
 	step = "execute";
 	if (mysql_stmt_execute(stmt))
@@ -123,10 +138,11 @@ err_out:
 	mysql_stmt_close(stmt);
 
 	applog(LOG_ERR, "mysql pwdb query failed at %s", step);
+	userid_out = 0;
 	return NULL;
 }
 
-static bool my_sharelog(const char *rem_host, const char *username,
+static bool my_sharelog(const char *rem_host, const unsigned int userid,
 			const char *our_result, const char *upstream_result,
 			const char *reason, const char *solution)
 {
@@ -144,7 +160,7 @@ static bool my_sharelog(const char *rem_host, const char *username,
 	memset(bind_param, 0, sizeof(bind_param));
 	memset(bind_lengths, 0, sizeof(bind_lengths));
 	bind_instr(bind_param, bind_lengths, 0, rem_host);
-	bind_instr(bind_param, bind_lengths, 1, username);
+	bind_inint(bind_param, bind_lengths, 1, userid);
 	bind_instr(bind_param, bind_lengths, 2, our_result);
 	bind_instr(bind_param, bind_lengths, 3, upstream_result);
 	bind_instr(bind_param, bind_lengths, 4, reason);

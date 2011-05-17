@@ -62,7 +62,7 @@ static const char *bc_err_str[] = {
 	[BC_ERR_INTERNAL] = "internal server err",
 };
 
-char *pwdb_lookup(const char *user)
+char *pwdb_lookup(const char *user, unsigned int *userid)
 {
 	char *pass = NULL;
 	char cred_key[256];
@@ -70,7 +70,7 @@ char *pwdb_lookup(const char *user)
 	size_t out_len;
 	memcached_return_t rc;
 
-	if (srv.mc) {
+	if (false && srv.mc) {
 		snprintf(cred_key, sizeof(cred_key),
 			 "/pushpoold/cred_cache/%s", user);
 
@@ -80,9 +80,9 @@ char *pwdb_lookup(const char *user)
 			return pass;		/* may be NULL, for negative caching */
 	}
 
-	pass = srv.db_ops->pwdb_lookup(user);
+	pass = srv.db_ops->pwdb_lookup(user, userid);
 
-	if (srv.mc) {
+	if (false && srv.mc) {
 		rc = memcached_set(srv.mc, cred_key, strlen(cred_key) + 1,
 				   pass,
 				   pass ? strlen(pass) + 1 : 0,
@@ -314,7 +314,7 @@ static int check_hash(const char *remote_host, const char *auth_user,
 	return better_hash ? 2 : 1;			/* work is valid */
 }
 
-static bool submit_work(const char *remote_host, const char *auth_user,
+static bool submit_work(const char *remote_host, const char *auth_user, const unsigned int auth_userid,
 			CURL *curl, const char *hexstr, bool *json_result)
 {
 	json_t *val;
@@ -329,7 +329,7 @@ static bool submit_work(const char *remote_host, const char *auth_user,
 		goto out;
 	if (check_rc == 0) {	/* invalid hash */
 		*json_result = false;
-		sharelog(remote_host, auth_user, "N", NULL, reason, hexstr);
+		sharelog(remote_host, auth_user, auth_userid, "N", NULL, reason, hexstr);
 		return true;
 	}
 
@@ -338,7 +338,7 @@ static bool submit_work(const char *remote_host, const char *auth_user,
 	 */
 	if (srv.easy_target && check_rc == 1) {
 		*json_result = true;
-		sharelog(remote_host, auth_user, "Y", NULL, NULL, hexstr);
+		sharelog(remote_host, auth_user, auth_userid, "Y", NULL, NULL, hexstr);
 		return true;
 	}
 
@@ -357,7 +357,7 @@ static bool submit_work(const char *remote_host, const char *auth_user,
 	*json_result = json_is_true(json_object_get(val, "result"));
 	rc = true;
 
-	sharelog(remote_host, auth_user,
+	sharelog(remote_host, auth_user, auth_userid,
 		 srv.easy_target ? "Y" : *json_result ? "Y" : "N",
 		 *json_result ? "Y" : "N", NULL, hexstr);
 
@@ -380,7 +380,7 @@ out:
 	return rc;
 }
 
-static bool submit_bin_work(const char *remote_host, const char *auth_user,
+static bool submit_bin_work(const char *remote_host, const char *auth_user, const unsigned int auth_userid,
 			    CURL *curl, void *data, bool *json_result)
 {
 	char *hexstr = NULL;
@@ -393,7 +393,7 @@ static bool submit_bin_work(const char *remote_host, const char *auth_user,
 		goto out;
 	}
 
-	rc = submit_work(remote_host, auth_user, curl, hexstr, json_result);
+	rc = submit_work(remote_host, auth_user, auth_userid, curl, hexstr, json_result);
 
 	free(hexstr);
 
@@ -411,6 +411,7 @@ bool cli_op_login(struct client *cli, const json_t *obj, unsigned int msgsz)
 {
 	char user[33];
 	char *pass;
+	unsigned int userid = 0;
 	json_t *cfg, *resobj, *res_cfgobj;
 	int version, err_code = BC_ERR_INTERNAL;
 	bool rc;
@@ -429,7 +430,7 @@ bool cli_op_login(struct client *cli, const json_t *obj, unsigned int msgsz)
 		sizeof(user));
 	user[sizeof(user) - 1] = 0;
 
-	pass = pwdb_lookup(user);
+	pass = pwdb_lookup(user, &userid);
 	if (!pass) {
 		applog(LOG_WARNING, "unknown user %s", user);
 		err_code = BC_ERR_AUTH;
@@ -580,7 +581,7 @@ bool cli_op_work_submit(struct client *cli, unsigned int msgsz)
 
 	if (msgsz != 128)
 		goto err_out;
-	if (!submit_bin_work(cli->addr_host, cli->auth_user,
+	if (!submit_bin_work(cli->addr_host, cli->auth_user, 0/*FIXME:use userid instead*/,
 			     srv.curl, cli->msg, &json_res)) {
 		err_code = BC_ERR_RPC;
 		goto err_out;
@@ -613,6 +614,7 @@ static json_t *json_rpc_errobj(int code, const char *msg)
 
 bool msg_json_rpc(struct evhttp_request *req, json_t *jreq,
 		  const char *username,
+		  const unsigned int userid,
 		  void **reply, unsigned int *reply_len)
 {
 	const char *method;
@@ -683,7 +685,7 @@ bool msg_json_rpc(struct evhttp_request *req, json_t *jreq,
 			goto out;
 		}
 
-		rpc_rc = submit_work(req->remote_host, username, srv.curl,
+		rpc_rc = submit_work(req->remote_host, username, userid, srv.curl,
 				     soln_str, &json_result);
 
 		if (rpc_rc) {
